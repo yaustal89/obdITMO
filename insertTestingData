@@ -1,0 +1,67 @@
+-- =====================================================
+-- ТЕСТОВЫЕ ДАННЫЕ
+-- =====================================================
+
+-- Regions
+INSERT INTO Regions (region_id, region_name) VALUES 
+    (1, 'Республика Татарстан'),
+    (2, 'Московская область')
+ON CONFLICT (region_id) DO NOTHING;
+
+-- Region_License_Codes
+INSERT INTO Region_License_Codes (license_code_id, region_id, license_region_code, start_date, end_date) VALUES 
+    (1, 1, '116', '2020-01-01', NULL),
+    (2, 1, '716', '2023-01-01', NULL),
+    (3, 2, '150', '2015-01-01', '2022-12-31'),
+    (4, 2, '750', '2023-01-01', NULL)
+ON CONFLICT (license_code_id) DO NOTHING;
+
+-- Locations
+INSERT INTO Locations (location_id, location_name, region_id, parent_location_id) VALUES 
+    (1, 'Республика Татарстан', 1, NULL),
+    (2, 'Казань', 1, 1),
+    (3, 'Приволжский район', 1, 2),
+    (4, 'Московская область', 2, NULL),
+    (5, 'Красногорск', 2, 4)
+ON CONFLICT (location_id) DO NOTHING;
+
+-- Cars
+INSERT INTO Cars (car_id, license_number, license_region_code, brand, model, region_id) VALUES 
+    (1, 'А123ВС', '116', 'Toyota', 'Camry', 1),
+    (2, 'О777ОО', '716', 'Kia', 'Rio', 1),
+    (3, 'Х001ХХ', '750', 'Lada', 'Vesta', 2)
+ON CONFLICT (car_id) DO NOTHING;
+
+-- Accidents_People
+INSERT INTO Accidents_People (person_id, birth_date, gender) VALUES 
+    (1, '1985-03-15', 'M'),
+    (2, '1990-07-22', 'F'),
+    (3, '2000-12-01', 'M')
+ON CONFLICT (person_id) DO NOTHING;
+
+-- Victims
+INSERT INTO Victims (victim_id, person_id) VALUES 
+    (100, 2),
+    (101, 3)
+ON CONFLICT (victim_id) DO NOTHING;
+
+-- Car_Accidents
+INSERT INTO Car_Accidents (accident_id, location_id, victim_id, longitude, latitude, accident_time) VALUES 
+    (1000, 3, 100, 55.796127, 49.106405, '2025-01-15 18:30:00')
+ON CONFLICT (accident_id) DO NOTHING;
+
+-- Accident_Cars
+INSERT INTO Accident_Cars (accident_car_id, accident_id, car_id, driver_id, damage_severity) VALUES 
+    (5000, 1000, 1, 1, 2),
+    (5001, 1000, 2, NULL, 3)
+ON CONFLICT (accident_car_id) DO NOTHING;
+
+-- Сброс последовательностей (чтобы ID продолжались с правильного числа)
+SELECT setval('regions_region_id_seq', COALESCE((SELECT MAX(region_id) FROM Regions), 1));
+SELECT setval('region_license_codes_license_code_id_seq', COALESCE((SELECT MAX(license_code_id) FROM Region_License_Codes), 1));
+SELECT setval('locations_location_id_seq', COALESCE((SELECT MAX(location_id) FROM Locations), 1));
+SELECT setval('cars_car_id_seq', COALESCE((SELECT MAX(car_id) FROM Cars), 1));
+SELECT setval('accidents_people_person_id_seq', COALESCE((SELECT MAX(person_id) FROM Accidents_People), 1));
+SELECT setval('victims_victim_id_seq', COALESCE((SELECT MAX(victim_id) FROM Victims), 100));
+SELECT setval('car_accidents_accident_id_seq', COALESCE((SELECT MAX(accident_id) FROM Car_Accidents), 1000));
+SELECT setval('accident_cars_accident_car_id_seq', COALESCE((SELECT MAX(accident_car_id) FROM Accident_Cars), 5000));
