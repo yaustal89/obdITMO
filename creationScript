@@ -1,0 +1,213 @@
+-- =====================================================
+-- БАЗА ДАННЫХ ДЛЯ УЧЁТА ДТП (SUPABASE)
+-- =====================================================
+
+-- Таблица регионов
+CREATE TABLE Regions (
+    region_id SERIAL PRIMARY KEY,
+    region_name VARCHAR(100) UNIQUE NOT NULL
+);
+
+-- Таблица множественных кодов регионов
+CREATE TABLE Region_License_Codes (
+    license_code_id SERIAL PRIMARY KEY,
+    region_id INT NOT NULL,
+    license_region_code VARCHAR(10) NOT NULL,
+    start_date DATE,
+    end_date DATE,
+    FOREIGN KEY (region_id) REFERENCES Regions(region_id)
+);
+
+-- Таблица локаций (объединённые города и районы)
+CREATE TABLE Locations (
+    location_id SERIAL PRIMARY KEY,
+    location_name VARCHAR(200) NOT NULL,
+    region_id INT NOT NULL,
+    parent_location_id INT NULL,
+    FOREIGN KEY (region_id) REFERENCES Regions(region_id),
+    FOREIGN KEY (parent_location_id) REFERENCES Locations(location_id)
+);
+
+-- Таблица автомобилей
+CREATE TABLE Cars (
+    car_id SERIAL PRIMARY KEY,
+    license_number VARCHAR(20) NOT NULL,
+    license_region_code VARCHAR(10) NOT NULL,
+    brand VARCHAR(50),
+    model VARCHAR(50),
+    region_id INT NOT NULL,
+    FOREIGN KEY (region_id) REFERENCES Regions(region_id),
+    UNIQUE (license_number, region_id)
+);
+
+-- Таблица людей
+CREATE TABLE Accidents_People (
+    person_id SERIAL PRIMARY KEY,
+    birth_date DATE,
+    gender CHAR(1) CHECK (gender IN ('M', 'F'))
+);
+
+-- Таблица пострадавших
+CREATE TABLE Victims (
+    victim_id SERIAL PRIMARY KEY,
+    person_id INT NOT NULL UNIQUE,
+    FOREIGN KEY (person_id) REFERENCES Accidents_People(person_id)
+);
+
+-- Таблица ДТП
+CREATE TABLE Car_Accidents (
+    accident_id SERIAL PRIMARY KEY,
+    location_id INT NOT NULL,
+    victim_id INT NOT NULL,
+    longitude DECIMAL(10,7),
+    latitude DECIMAL(10,7),
+    accident_time TIMESTAMP NOT NULL,
+    FOREIGN KEY (location_id) REFERENCES Locations(location_id),
+    FOREIGN KEY (victim_id) REFERENCES Victims(victim_id)
+);
+
+-- Таблица связи ДТП и автомобилей
+CREATE TABLE Accident_Cars (
+    accident_car_id SERIAL PRIMARY KEY,
+    accident_id INT NOT NULL,
+    car_id INT NOT NULL,
+    driver_id INT NULL,
+    damage_severity INT CHECK (damage_severity IN (1,2,3)),
+    FOREIGN KEY (accident_id) REFERENCES Car_Accidents(accident_id),
+    FOREIGN KEY (car_id) REFERENCES Cars(car_id),
+    FOREIGN KEY (driver_id) REFERENCES Accidents_People(person_id)
+);
+
+-- Индексы для производительности
+CREATE INDEX idx_accidents_time ON Car_Accidents(accident_time);
+CREATE INDEX idx_accidents_location ON Car_Accidents(location_id);
+CREATE INDEX idx_accident_cars_accident ON Accident_Cars(accident_id);
+CREATE INDEX idx_accident_cars_car ON Accident_Cars(car_id);
+CREATE INDEX idx_cars_region ON Cars(region_id);
+CREATE INDEX idx_locations_parent ON Locations(parent_location_id);
+CREATE INDEX idx_license_codes_region ON Region_License_Codes(region_id);
+
+-- =====================================================
+-- ТРИГГЕРЫ
+-- =====================================================
+
+-- Триггер валидации кода региона
+CREATE OR REPLACE FUNCTION validate_license_region_code()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM Region_License_Codes
+        WHERE region_id = NEW.region_id
+          AND license_region_code = NEW.license_region_code
+          AND (start_date IS NULL OR start_date <= CURRENT_DATE)
+          AND (end_date IS NULL OR end_date >= CURRENT_DATE)
+    ) THEN
+        RAISE EXCEPTION 'Код региона % недействителен для региона %', NEW.license_region_code, NEW.region_id;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_validate_license_code
+BEFORE INSERT OR UPDATE ON Cars
+FOR EACH ROW EXECUTE FUNCTION validate_license_region_code();
+
+-- Триггер защиты от циклов в локациях
+CREATE OR REPLACE FUNCTION prevent_location_cycle()
+RETURNS TRIGGER AS $$
+DECLARE
+    current_id INT;
+BEGIN
+    IF NEW.parent_location_id IS NOT NULL THEN
+        current_id := NEW.parent_location_id;
+        WHILE current_id IS NOT NULL LOOP
+            IF current_id = NEW.location_id THEN
+                RAISE EXCEPTION 'Циклическая ссылка в иерархии локаций';
+            END IF;
+            SELECT parent_location_id INTO current_id FROM Locations WHERE location_id = current_id;
+        END LOOP;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_prevent_location_cycle
+BEFORE INSERT OR UPDATE ON Locations
+FOR EACH ROW EXECUTE FUNCTION prevent_location_cycle();
+
+-- =====================================================
+-- ФУНКЦИИ И ПРОЦЕДУРЫ
+-- =====================================================
+
+-- Функция статистики по региону
+CREATE OR REPLACE FUNCTION get_region_accident_stats(p_region_id INT, p_year INT)
+RETURNS TABLE(
+    accident_count BIGINT,
+    victim_count BIGINT,
+    avg_damage_severity NUMERIC
+) LANGUAGE plpgsql AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        COUNT(DISTINCT ca.accident_id)::BIGINT AS accident_count,
+        COUNT(DISTINCT ca.victim_id)::BIGINT AS victim_count,
+        AVG(ac.damage_severity)::NUMERIC AS avg_damage_severity
+    FROM Car_Accidents ca
+    JOIN Locations l ON ca.location_id = l.location_id
+    JOIN Accident_Cars ac ON ca.accident_id = ac.accident_id
+    WHERE l.region_id = p_region_id
+      AND EXTRACT(YEAR FROM ca.accident_time) = p_year;
+END;
+$$;
+
+-- Процедура регистрации ДТП
+CREATE OR REPLACE PROCEDURE register_accident(
+    p_location_id INT,
+    p_victim_person_id INT,
+    p_longitude DECIMAL,
+    p_latitude DECIMAL,
+    p_accident_time TIMESTAMP,
+    p_car_id INT,
+    p_driver_person_id INT,
+    p_damage_severity INT
+)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_accident_id INT;
+    v_victim_id INT;
+BEGIN
+    -- Получаем или создаём victim_id
+    SELECT victim_id INTO v_victim_id FROM Victims WHERE person_id = p_victim_person_id;
+    IF v_victim_id IS NULL THEN
+        INSERT INTO Victims (person_id) VALUES (p_victim_person_id)
+        RETURNING victim_id INTO v_victim_id;
+    END IF;
+
+    -- Создаём ДТП
+    INSERT INTO Car_Accidents (location_id, victim_id, longitude, latitude, accident_time)
+    VALUES (p_location_id, v_victim_id, p_longitude, p_latitude, p_accident_time)
+    RETURNING accident_id INTO v_accident_id;
+
+    -- Добавляем автомобиль-участник
+    INSERT INTO Accident_Cars (accident_id, car_id, driver_id, damage_severity)
+    VALUES (v_accident_id, p_car_id, p_driver_person_id, p_damage_severity);
+END;
+$$;
+
+-- Функция проверки номерного знака
+CREATE OR REPLACE FUNCTION validate_license_plate(
+    p_license_number VARCHAR,
+    p_license_region_code VARCHAR,
+    p_region_id INT
+)
+RETURNS BOOLEAN LANGUAGE plpgsql AS $$
+BEGIN
+    RETURN EXISTS (
+        SELECT 1 FROM Region_License_Codes
+        WHERE region_id = p_region_id
+          AND license_region_code = p_license_region_code
+          AND (start_date IS NULL OR start_date <= CURRENT_DATE)
+          AND (end_date IS NULL OR end_date >= CURRENT_DATE)
+    );
+END;
+$$;
