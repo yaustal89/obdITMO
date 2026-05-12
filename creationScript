@@ -40,7 +40,14 @@ CREATE TABLE Cars (
     UNIQUE (license_number, region_id)
 );
 
--- Таблица людей
+-- Таблица всех людей
+CREATE TABLE People (
+    person_id SERIAL PRIMARY KEY,
+    birth_date DATE,
+    gender CHAR(1) CHECK (gender IN ('M', 'F'))
+);
+
+-- Таблица людей, попадавших в происшествия
 CREATE TABLE Accidents_People (
     person_id SERIAL PRIMARY KEY,
     birth_date DATE,
