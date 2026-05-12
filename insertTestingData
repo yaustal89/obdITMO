@@ -56,6 +56,17 @@ INSERT INTO Accident_Cars (accident_car_id, accident_id, car_id, driver_id, dama
     (5001, 1000, 2, NULL, 3)
 ON CONFLICT (accident_car_id) DO NOTHING;
 
+-- People (с именами и фамилиями)
+INSERT INTO People (person_id, first_name, last_name, patronymic, birth_date, gender) VALUES 
+    (1, 'Иван', 'Иванов', 'Петрович', '1985-03-15', 'M'),
+    (2, 'Мария', 'Петрова', 'Сергеевна', '1990-07-22', 'F'),
+    (3, 'Алексей', 'Сидоров', 'Дмитриевич', '2000-12-01', 'M'),
+    (4, 'Дмитрий', 'Козлов', 'Андреевич', '1978-05-10', 'M'),
+    (5, 'Екатерина', 'Смирнова', 'Владимировна', '1995-09-18', 'F'),
+    (6, 'Павел', 'Новиков', 'Игоревич', '1982-11-30', 'M'),
+    (7, 'Анна', 'Морозова', 'Алексеевна', '2002-04-25', 'F'),
+    (8, 'Артём', 'Волков', 'Романович', '1998-08-12', 'M');
+
 -- Сброс последовательностей (чтобы ID продолжались с правильного числа)
 SELECT setval('regions_region_id_seq', COALESCE((SELECT MAX(region_id) FROM Regions), 1));
 SELECT setval('region_license_codes_license_code_id_seq', COALESCE((SELECT MAX(license_code_id) FROM Region_License_Codes), 1));
@@ -65,3 +76,5 @@ SELECT setval('accidents_people_person_id_seq', COALESCE((SELECT MAX(person_id) 
 SELECT setval('victims_victim_id_seq', COALESCE((SELECT MAX(victim_id) FROM Victims), 100));
 SELECT setval('car_accidents_accident_id_seq', COALESCE((SELECT MAX(accident_id) FROM Car_Accidents), 1000));
 SELECT setval('accident_cars_accident_car_id_seq', COALESCE((SELECT MAX(accident_car_id) FROM Accident_Cars), 5000));
+
+
